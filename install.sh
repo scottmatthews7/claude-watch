@@ -1,7 +1,7 @@
 #!/bin/bash
-# install.sh — Register the claude-watch Stop hook in Claude Code settings.
+# install.sh — Register claude-watch hooks in Claude Code settings.
 #
-# Adds a Stop hook entry pointing to notify.sh in ~/.claude/settings.json.
+# Adds Stop and Notification hook entries pointing to notify.sh in ~/.claude/settings.json.
 # Idempotent: safe to run multiple times. Preserves all existing settings and hooks.
 
 set -euo pipefail
@@ -41,22 +41,30 @@ if [[ ! -f "${SETTINGS_FILE}" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Check if the hook is already installed.
+# Install the hook for each event type (Stop + Notification).
+# Stop fires when Claude finishes responding.
+# Notification fires when Claude needs attention (e.g. permission prompts).
 # ---------------------------------------------------------------------------
-ALREADY_INSTALLED=$(
-    jq --arg cmd "${NOTIFY_PATH}" '
-        [.hooks.Stop // [] | .[] | .hooks[]? | select(.command == $cmd)] | length > 0
-    ' "${SETTINGS_FILE}"
-)
+HOOK_EVENTS=("Stop" "Notification")
 
-if [[ "${ALREADY_INSTALLED}" == "true" ]]; then
+ALREADY_ALL_INSTALLED=true
+for event in "${HOOK_EVENTS[@]}"; do
+    INSTALLED=$(
+        jq --arg cmd "${NOTIFY_PATH}" --arg evt "${event}" '
+            [.hooks[$evt] // [] | .[] | .hooks[]? | select(.command == $cmd)] | length > 0
+        ' "${SETTINGS_FILE}"
+    )
+    if [[ "${INSTALLED}" != "true" ]]; then
+        ALREADY_ALL_INSTALLED=false
+        break
+    fi
+done
+
+if [[ "${ALREADY_ALL_INSTALLED}" == "true" ]]; then
     echo "Already installed."
     exit 0
 fi
 
-# ---------------------------------------------------------------------------
-# Build the new hook entry and append it to .hooks.Stop[].
-# ---------------------------------------------------------------------------
 NEW_ENTRY=$(jq -n --arg cmd "${NOTIFY_PATH}" '{
     matcher: "",
     hooks: [
@@ -67,12 +75,21 @@ NEW_ENTRY=$(jq -n --arg cmd "${NOTIFY_PATH}" '{
     ]
 }')
 
-jq --argjson entry "${NEW_ENTRY}" '
-    .hooks //= {} |
-    .hooks.Stop //= [] |
-    .hooks.Stop += [$entry]
-' "${SETTINGS_FILE}" > "${SETTINGS_FILE}.tmp" \
-    && mv "${SETTINGS_FILE}.tmp" "${SETTINGS_FILE}"
+for event in "${HOOK_EVENTS[@]}"; do
+    INSTALLED=$(
+        jq --arg cmd "${NOTIFY_PATH}" --arg evt "${event}" '
+            [.hooks[$evt] // [] | .[] | .hooks[]? | select(.command == $cmd)] | length > 0
+        ' "${SETTINGS_FILE}"
+    )
+    if [[ "${INSTALLED}" != "true" ]]; then
+        jq --argjson entry "${NEW_ENTRY}" --arg evt "${event}" '
+            .hooks //= {} |
+            .hooks[$evt] //= [] |
+            .hooks[$evt] += [$entry]
+        ' "${SETTINGS_FILE}" > "${SETTINGS_FILE}.tmp" \
+            && mv "${SETTINGS_FILE}.tmp" "${SETTINGS_FILE}"
+    fi
+done
 
 echo "claude-watch installed successfully."
 echo ""

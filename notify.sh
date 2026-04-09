@@ -27,6 +27,7 @@ message="Done in ${project_name}"
 
 # Send the Pushover notification. Suppress all output. Exit 0 regardless of outcome.
 # Use --form-string to safely encode special characters in the message.
+# Note: the notification icon is set at the Pushover application level, not per-message.
 curl -s -o /dev/null \
     --max-time 10 \
     --form-string "token=${PUSHOVER_APP_TOKEN}" \

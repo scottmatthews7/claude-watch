@@ -1,5 +1,5 @@
 #!/bin/bash
-# Uninstall claude-watch: remove the Stop hook from Claude Code settings.
+# Uninstall claude-watch: remove Stop and Notification hooks from Claude Code settings.
 
 set -euo pipefail
 
@@ -17,23 +17,33 @@ if ! command -v jq &>/dev/null; then
   exit 1
 fi
 
-# Check whether any Stop hook entry contains a command matching our notify.sh path.
-MATCH_COUNT=$(jq --arg cmd "${NOTIFY_SCRIPT}" '
-  [.hooks.Stop // [] | .[] | select(.hooks[]?.command == $cmd)] | length
-' "${SETTINGS_FILE}")
+HOOK_EVENTS=("Stop" "Notification")
+FOUND=false
 
-if [[ "${MATCH_COUNT}" -eq 0 ]]; then
-  echo "garmin-claude hook not found in settings"
+for event in "${HOOK_EVENTS[@]}"; do
+  MATCH_COUNT=$(jq --arg cmd "${NOTIFY_SCRIPT}" --arg evt "${event}" '
+    [.hooks[$evt] // [] | .[] | select(.hooks[]?.command == $cmd)] | length
+  ' "${SETTINGS_FILE}")
+  if [[ "${MATCH_COUNT}" -gt 0 ]]; then
+    FOUND=true
+    break
+  fi
+done
+
+if [[ "${FOUND}" != "true" ]]; then
+  echo "claude-watch hook not found in settings"
   exit 0
 fi
 
-# Remove matching entries from the Stop array, then prune empty structures.
+# Remove matching entries from both hook arrays, then prune empty structures.
 jq --arg cmd "${NOTIFY_SCRIPT}" '
-  # Remove Stop entries whose hooks array contains a matching command
-  .hooks.Stop = [.hooks.Stop[] | select((.hooks // []) | all(.command != $cmd))]
+  # Remove entries whose hooks array contains a matching command
+  .hooks.Stop = [(.hooks.Stop // [])[] | select((.hooks // []) | all(.command != $cmd))]
+  | .hooks.Notification = [(.hooks.Notification // [])[] | select((.hooks // []) | all(.command != $cmd))]
 
-  # If Stop array is now empty, remove the key
+  # Remove empty arrays
   | if (.hooks.Stop | length) == 0 then del(.hooks.Stop) else . end
+  | if (.hooks.Notification | length) == 0 then del(.hooks.Notification) else . end
 
   # If hooks object is now empty, remove the key
   | if (.hooks | length) == 0 then del(.hooks) else . end
@@ -41,4 +51,4 @@ jq --arg cmd "${NOTIFY_SCRIPT}" '
 
 mv "${SETTINGS_FILE}.tmp" "${SETTINGS_FILE}"
 
-echo "Uninstalled. Garmin notifications disabled."
+echo "Uninstalled. Smartwatch notifications disabled."
